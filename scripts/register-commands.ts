@@ -25,6 +25,24 @@ const commands = [
     name: "help",
     description: "Show Gatekeeper command help",
   },
+  {
+    name: "swap-connection",
+    description: "Swap/toggle allow connection permission for a role in target room",
+    options: [
+      {
+        name: "room",
+        description: "Target voice or channel room",
+        type: 7,
+        required: true,
+      },
+      {
+        name: "role",
+        description: "Role to toggle connection permission for",
+        type: 8,
+        required: true,
+      },
+    ],
+  },
 ];
 
 const url = guildId
@@ -50,3 +68,5 @@ if (!res.ok) {
 
 const data = (await res.json()) as any[];
 console.log(`Successfully registered ${data.length} commands.`);
+
+export {};

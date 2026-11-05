@@ -1,7 +1,9 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { config } from "./config";
 import { dbService, initDb, sql } from "./db";
 import { redisService } from "./redis";
+import { startDiscordBot, botState, swapRoleRoomConnection } from "./bot/discord";
+import { renderDashboardHtml } from "./views/dashboard";
 
 export const app = new Hono();
 
@@ -44,8 +46,18 @@ export function getInviteUrl(appId?: string): string {
   return `https://discord.com/oauth2/authorize?client_id=${id}&scope=bot%20applications.commands&permissions=8`;
 }
 
-// Health check endpoint with DB & Redis status
+// RawBlock Frontend Dashboard
+app.get("/dashboard", async (c) => {
+  return c.html(await renderDashboardHtml());
+});
+
+// Root: Dashboard for browsers, JSON for API/curl/tests
 app.get("/", async (c) => {
+  const accept = c.req.header("accept") || "";
+  if (accept.includes("text/html") && !accept.includes("application/json")) {
+    return c.html(await renderDashboardHtml());
+  }
+
   let dbOk = false;
   try {
     const check = await sql`SELECT 1 as ok`;
@@ -59,6 +71,11 @@ app.get("/", async (c) => {
   return c.json({
     service: "gatekeeper",
     status: "ok",
+    bot: {
+      connected: botState.connected,
+      tag: botState.tag,
+      ping: botState.ping,
+    },
     database: dbOk ? "connected" : "disconnected",
     redis: redisOk ? "connected" : "disconnected",
     invite_url: getInviteUrl() || null,
@@ -68,6 +85,17 @@ app.get("/", async (c) => {
 });
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Whitelist Real-time Verification check
+app.get("/api/whitelist/check", async (c) => {
+  const serverId = c.req.query("serverId") || "";
+  const targetId = c.req.query("targetId") || "";
+  if (!serverId || !targetId) {
+    return c.json({ error: "serverId and targetId are required" }, 400);
+  }
+  const allowed = await isAllowed(serverId, targetId);
+  return c.json({ serverId, targetId, allowed });
+});
 
 // Server & room management API
 app.get("/api/servers", async (c) => {
@@ -92,6 +120,21 @@ app.post("/api/servers", async (c) => {
   }
 });
 
+app.delete("/api/servers", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const id = body.id || c.req.query("id");
+    if (!id) {
+      return c.json({ error: "id is required" }, 400);
+    }
+    const deleted = await dbService.removeServer(id);
+    await redisService.invalidateServer(id);
+    return c.json({ success: deleted });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 app.get("/api/rooms", async (c) => {
   try {
     const serverId = c.req.query("serverId");
@@ -110,6 +153,20 @@ app.post("/api/rooms", async (c) => {
     }
     const room = await dbService.upsertRoom(body);
     return c.json(room);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.post("/api/rooms/swap-connection", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { roomId, roleId } = body;
+    if (!roomId || !roleId) {
+      return c.json({ error: "roomId and roleId are required" }, 400);
+    }
+    const result = await swapRoleRoomConnection(roomId, roleId);
+    return c.json(result);
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -141,13 +198,24 @@ app.post("/api/whitelist", async (c) => {
 
 app.delete("/api/whitelist", async (c) => {
   try {
-    const body = await c.req.json();
-    if (!body.serverId || !body.targetId) {
-      return c.json({ error: "serverId and targetId are required" }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    const serverId = body.serverId || c.req.query("serverId");
+    const targetId = body.targetId || c.req.query("targetId");
+
+    if (!serverId) {
+      return c.json({ error: "serverId is required" }, 400);
     }
-    const deleted = await dbService.removeWhitelist(body.serverId, body.targetId);
-    await redisService.invalidateWhitelist(body.serverId, body.targetId);
-    return c.json({ success: deleted });
+
+    if (targetId) {
+      const deleted = await dbService.removeWhitelist(serverId, targetId);
+      await redisService.invalidateWhitelist(serverId, targetId);
+      return c.json({ success: deleted });
+    } else {
+      // Remove all whitelist entries for the specified server
+      const count = await dbService.removeWhitelistByServer(serverId);
+      await redisService.invalidateServer(serverId);
+      return c.json({ success: true, removedCount: count });
+    }
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -168,12 +236,12 @@ async function isAllowed(serverId: string, targetId: string): Promise<boolean> {
 }
 
 // Discord Interaction handler
-async function handleInteraction(c: any) {
+async function handleInteraction(c: Context) {
   const signature = c.req.header("x-signature-ed25519") ?? "";
   const timestamp = c.req.header("x-signature-timestamp") ?? "";
   const rawBody = await c.req.text();
 
-  const publicKey = config.discord.publicKey || process.env.DISCORD_PUBLIC_KEY || "";
+  const publicKey = process.env.DISCORD_PUBLIC_KEY || config.discord.publicKey || "";
   if (!publicKey) {
     return c.text("DISCORD_PUBLIC_KEY not configured", 500);
   }
@@ -254,13 +322,19 @@ app.post("/", handleInteraction);
 app.post("/interactions", handleInteraction);
 app.post("/api/interactions", handleInteraction);
 
-const inviteUrl = getInviteUrl();
-console.log(`🚀 Gatekeeper server running on http://localhost:${config.port}`);
-console.log(
-  inviteUrl
-    ? `🤖 Discord Bot Invite: ${inviteUrl}`
-    : `ℹ️ Discord Bot Invite: (set DISCORD_APPLICATION_ID in .env)`
-);
+if (import.meta.main) {
+  const inviteUrl = getInviteUrl();
+  console.log(`🚀 Gatekeeper server running on http://localhost:${config.port}`);
+  console.log(
+    inviteUrl
+      ? `🤖 Discord Bot Invite: ${inviteUrl}`
+      : `ℹ️ Discord Bot Invite: (set DISCORD_APPLICATION_ID in .env)`
+  );
+
+  startDiscordBot().catch((err) => {
+    console.warn("Discord gateway notice:", err.message);
+  });
+}
 
 export default {
   port: config.port,

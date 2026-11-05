@@ -2,7 +2,7 @@
 const compile = process.argv.includes("--compile");
 
 if (compile) {
-  const target = `bun-${process.platform}-${process.arch}` as const;
+  const target = `bun-${process.platform}-${process.arch}` as any;
   const outfile = process.platform === "win32" ? "dist/server.exe" : "dist/server";
   console.log(`Compiling standalone binary for ${target}...`);
   const result = await Bun.build({
@@ -32,3 +32,5 @@ if (compile) {
   }
   console.log("Built: dist/index.js");
 }
+
+export {};

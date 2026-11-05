@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { app } from "../src/index";
+import { config } from "../src/config";
 import { redisService } from "../src/redis";
 
 describe("Gatekeeper Bot API", () => {
@@ -12,6 +13,7 @@ describe("Gatekeeper Bot API", () => {
     const rawPub = await crypto.subtle.exportKey("raw", keyPair.publicKey);
     publicKeyHex = Buffer.from(rawPub).toString("hex");
     process.env.DISCORD_PUBLIC_KEY = publicKeyHex;
+    config.discord.publicKey = publicKeyHex;
   });
 
   async function createSignedRequest(path: string, bodyObj: any, timestamp = "1234567890") {
@@ -113,5 +115,70 @@ describe("Gatekeeper Bot API", () => {
     const data = await res.json();
     expect(data.type).toBe(4);
     expect(data.data.content).toContain("Verification successful");
+  });
+
+  it("GET /dashboard returns RawBlock HTML dashboard", async () => {
+    const res = await app.request("/dashboard");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("GATEKEEPER");
+    expect(html).toContain("WHITELIST REGISTRY");
+    expect(html).toContain("RAWBLOCK ACCESS GATEWAY");
+  });
+
+  it("GET /api/whitelist/check verifies user permissions", async () => {
+    const res = await app.request("/api/whitelist/check?serverId=test-guild&targetId=authorized-user-123");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.allowed).toBe(true);
+  });
+
+  it("POST & DELETE /api/servers manages target server lifecycle", async () => {
+    const addRes = await app.request("/api/servers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "temp-guild-99", name: "Temporary Guild" }),
+    });
+    expect(addRes.status).toBe(200);
+
+    const delRes = await app.request("/api/servers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "temp-guild-99" }),
+    });
+    expect(delRes.status).toBe(200);
+    const delData = await delRes.json();
+    expect(delData.success).toBe(true);
+  });
+
+  it("DELETE /api/whitelist removes whitelist by server", async () => {
+    const delRes = await app.request("/api/whitelist?serverId=temp-guild-99", {
+      method: "DELETE",
+    });
+    expect(delRes.status).toBe(200);
+    const data = await delRes.json();
+    expect(data.success).toBe(true);
+  });
+
+  it("POST /api/rooms/swap-connection validates input parameters", async () => {
+    const res = await app.request("/api/rooms/swap-connection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain("required");
+  });
+
+  it("POST /api/rooms/swap-connection handles offline or missing channel safely", async () => {
+    const res = await app.request("/api/rooms/swap-connection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId: "non-existent-room", roleId: "non-existent-role" }),
+    });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBeDefined();
   });
 });

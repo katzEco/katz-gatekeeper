@@ -48,4 +48,15 @@ export const redisService = {
       console.warn("Redis cache invalidate failed:", err);
     }
   },
+
+  async invalidateServer(serverId: string): Promise<void> {
+    try {
+      const keys = (await redis.keys(`gatekeeper:whitelist:${serverId}:*`)) as string[];
+      if (keys && keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } catch (err) {
+      console.warn("Redis invalidateServer failed:", err);
+    }
+  },
 };

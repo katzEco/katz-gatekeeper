@@ -9,6 +9,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "discord.js": "^14.28.1",
     "hono": "^4.13.16"
   },
   "devDependencies": {

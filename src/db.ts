@@ -2,7 +2,7 @@
 import { SQL } from "bun";
 import { config } from "./config";
 
-export const sql = new SQL(config.databaseUrl);
+export const sql = new SQL(config.databaseUrl, { max: 5 });
 
 export interface ServerRecord {
   id: string;
@@ -59,7 +59,10 @@ async function ensureDatabaseExists(dbUrl: string): Promise<void> {
   }
 }
 
+let dbInitialized = false;
+
 export async function initDb(): Promise<void> {
+  if (dbInitialized) return;
   await ensureDatabaseExists(config.databaseUrl);
 
   await sql`
@@ -97,6 +100,7 @@ export async function initDb(): Promise<void> {
 
   await sql`CREATE INDEX IF NOT EXISTS idx_rooms_server_id ON rooms(server_id);`;
   await sql`CREATE INDEX IF NOT EXISTS idx_whitelist_server_target ON whitelist(server_id, target_id);`;
+  dbInitialized = true;
 }
 
 export const dbService = {
@@ -124,6 +128,15 @@ export const dbService = {
       RETURNING *;
     `;
     return (rows as any[])[0] as unknown as ServerRecord;
+  },
+
+  async removeServer(id: string): Promise<boolean> {
+    const res = await sql`
+      DELETE FROM servers
+      WHERE id = ${id}
+      RETURNING id;
+    `;
+    return (res as any[]).length > 0;
   },
 
   // Rooms
@@ -203,5 +216,14 @@ export const dbService = {
       RETURNING id;
     `;
     return (res as any[]).length > 0;
+  },
+
+  async removeWhitelistByServer(serverId: string): Promise<number> {
+    const res = await sql`
+      DELETE FROM whitelist
+      WHERE server_id = ${serverId}
+      RETURNING id;
+    `;
+    return (res as any[]).length;
   },
 };
