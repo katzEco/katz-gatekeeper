@@ -1,0 +1,24 @@
+# ponytail: minimal compose service for gatekeeper discord bot
+services:
+  gatekeeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gatekeeper_bot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=${PORT:-3000}
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgres://dethz:dethz198@host.docker.internal:5431/gatekeeper}
+      - REDIS_URL=${DOCKER_REDIS_URL:-redis://host.docker.internal:6380}
+      - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID:-}
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY:-}
+      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
