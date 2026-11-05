@@ -1,11 +1,16 @@
 // ponytail: lightweight discord.js gateway client; handles slash commands & online presence
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
+  EmbedBuilder,
   Events,
   GatewayIntentBits,
   MessageFlags,
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
+  type ButtonInteraction,
 } from "discord.js";
 import { config } from "../config";
 import { dbService } from "../db";
@@ -78,6 +83,39 @@ export async function swapRoleRoomConnection(
   };
 }
 
+// ponytail: builds brutalist control panel embed and swap button components
+export function createControlPanelComponents(
+  roomId: string,
+  roleId: string,
+  allowed: boolean,
+  lastUpdatedBy?: string
+) {
+  const embed = new EmbedBuilder()
+    .setColor(allowed ? 0xa6da95 : 0xed8796) // Catppuccin Green or Red
+    .setTitle("🛡️ GATEKEEPER // ROOM ACCESS CONTROLLER")
+    .setDescription("Interactive connection access panel. Click the button below to toggle role connection permission.")
+    .addFields(
+      { name: "Target Room", value: `<#${roomId}>`, inline: true },
+      { name: "Controlled Role", value: `<@&${roleId}>`, inline: true },
+      { name: "Connection Access", value: allowed ? "✅ **ALLOWED**" : "⛔ **DENIED**", inline: true },
+      ...(lastUpdatedBy
+        ? [{ name: "Last Toggled By", value: `${lastUpdatedBy}` }]
+        : [{ name: "Status", value: "Ready for access control" }])
+    )
+    .setFooter({ text: "Gatekeeper Access Gateway • RawBlock Control" })
+    .setTimestamp();
+
+  const button = new ButtonBuilder()
+    .setCustomId(`swap_conn:${roomId}:${roleId}`)
+    .setLabel(allowed ? "LOCK ROOM (DENY ACCESS)" : "UNLOCK ROOM (ALLOW ACCESS)")
+    .setEmoji(allowed ? "🔒" : "🔓")
+    .setStyle(allowed ? ButtonStyle.Danger : ButtonStyle.Success);
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+
+  return { embed, row };
+}
+
 export async function startDiscordBot(): Promise<Client | null> {
   const token = config.discord.token;
   if (!token) {
@@ -113,6 +151,34 @@ export async function startDiscordBot(): Promise<Client | null> {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    // Handle Interactive Button Clicks (Swap Connection)
+    if (interaction.isButton()) {
+      const { customId, user } = interaction;
+      if (customId.startsWith("swap_conn:")) {
+        const [, roomId, roleId] = customId.split(":");
+        try {
+          const res = await swapRoleRoomConnection(roomId, roleId);
+          const { embed, row } = createControlPanelComponents(
+            roomId,
+            roleId,
+            res.allowed,
+            `<@${user.id}> at <t:${Math.floor(Date.now() / 1000)}:T>`
+          );
+
+          await interaction.update({
+            embeds: [embed],
+            components: [row],
+          });
+        } catch (err: any) {
+          await interaction.reply({
+            content: `❌ Error toggling room access: ${err.message}`,
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
     const { commandName, guildId, user } = interaction;
     const currentGuild = guildId || "global";
@@ -171,10 +237,44 @@ export async function startDiscordBot(): Promise<Client | null> {
         return;
       }
 
+      if (commandName === "control-room") {
+        const targetRoom = interaction.options.getChannel("target_room", true);
+        const role = interaction.options.getRole("role", true);
+
+        // Check current permission state
+        const guildChannel = targetRoom as any;
+        const currentOverwrite = guildChannel.permissionOverwrites?.cache?.get(role.id);
+        const currentlyAllowed = currentOverwrite?.allow?.has?.(PermissionFlagsBits.Connect) ?? false;
+
+        // Upsert room in database
+        if (guildId) {
+          dbService
+            .upsertRoom({
+              id: targetRoom.id,
+              serverId: guildId,
+              name: targetRoom.name || targetRoom.id,
+              type: "voice",
+            })
+            .catch(() => {});
+        }
+
+        const { embed, row } = createControlPanelComponents(
+          targetRoom.id,
+          role.id,
+          currentlyAllowed
+        );
+
+        await interaction.reply({
+          embeds: [embed],
+          components: [row],
+        });
+        return;
+      }
+
       if (commandName === "help") {
         await interaction.reply({
           content:
-            "🛡️ **Gatekeeper Commands**\n• `/ping` - Latency check\n• `/gatekeeper` - Diagnostics\n• `/verify` - User whitelist check\n• `/swap-connection` - Toggle role room connection\n• `/help` - Command list",
+            "🛡️ **Gatekeeper Commands**\n• `/ping` - Latency check\n• `/gatekeeper` - Diagnostics\n• `/verify` - User whitelist check\n• `/swap-connection` - Toggle role room connection\n• `/control-room` - Post interactive room controller panel with button\n• `/help` - Command list",
           flags: MessageFlags.Ephemeral,
         });
         return;

@@ -43,6 +43,24 @@ const commands = [
       },
     ],
   },
+  {
+    name: "control-room",
+    description: "Post interactive control panel embed with a button to toggle connection access",
+    options: [
+      {
+        name: "target_room",
+        description: "Target voice or channel room to control",
+        type: 7,
+        required: true,
+      },
+      {
+        name: "role",
+        description: "Target role to toggle connection access for",
+        type: 8,
+        required: true,
+      },
+    ],
+  },
 ];
 
 const url = guildId

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import { app } from "../src/index";
 import { config } from "../src/config";
 import { redisService } from "../src/redis";
+import { createControlPanelComponents } from "../src/bot/discord";
 
 describe("Gatekeeper Bot API", () => {
   let publicKeyHex: string;
@@ -180,5 +181,20 @@ describe("Gatekeeper Bot API", () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBeDefined();
+  });
+
+  it("createControlPanelComponents builds embed with interactive swap button", () => {
+    const { embed, row } = createControlPanelComponents("room-123", "role-456", true);
+    expect(embed.data.title).toContain("ROOM ACCESS CONTROLLER");
+    expect(embed.data.color).toBe(0xa6da95);
+    expect(row.components.length).toBe(1);
+    const btn = row.components[0] as any;
+    expect(btn.data.custom_id).toBe("swap_conn:room-123:role-456");
+    expect(btn.data.label).toContain("LOCK");
+
+    const locked = createControlPanelComponents("room-123", "role-456", false);
+    expect(locked.embed.data.color).toBe(0xed8796);
+    const lockedBtn = locked.row.components[0] as any;
+    expect(lockedBtn.data.label).toContain("UNLOCK");
   });
 });

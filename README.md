@@ -68,6 +68,8 @@ bun run register
 | `/ping` | Latency & health check | Replies with bot status and roundtrip latency |
 | `/gatekeeper` | System diagnostics | Displays current Guild ID, PostgreSQL, and Redis status |
 | `/verify` | User access check | Checks if user is on the server whitelist via Redis + Postgres |
+| `/control-room` | Interactive room panel | Posts a rich embed with dynamic toggle button to control connection access |
+| `/swap-connection` | Toggle room access | Swaps `Connect` permission for target role in specified room |
 | `/help` | Command reference | Displays interactive guide to available commands |
 
 ---
