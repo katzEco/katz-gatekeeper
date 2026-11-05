@@ -1,2 +1,16 @@
 # deps
 node_modules/
+
+# env
+.env
+.env.local
+
+# database
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+dist
+.agents

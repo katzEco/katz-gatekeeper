@@ -1,7 +1,12 @@
 {
   "name": "gatekeeper_bot",
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun run scripts/build.ts",
+    "bot": "bun run src/bot/index.ts",
+    "register": "bun run scripts/register-commands.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "hono": "^4.13.16"
